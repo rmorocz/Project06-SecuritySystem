@@ -1,0 +1,142 @@
+// 0. Documentation
+//    Purpose:          Apply the learnings from the previous project to develop a simple security system using switches, 
+//                      LED lights, solderless breadboard, an the Tiva C Series LaunchPad. 
+//    Author:           Ricardo Morocz
+//    Date:             07/23/2017
+//    Notes:            - PE0 connected to positive logic switch (Activate Switch) on breadboard
+//                      - PE1 connected to positive logic switch (Window Sensor) on breadboard
+//                      - PE2 connected to positive logic low current red LED (Alarm LED) on breadboard
+//                      - PE3 connected to positive logic low current green LED (Status LED) on breadboard
+
+//--------------------------------------------------------------------------------------------------------------------------
+// 1. Pre-processor Directives
+#include "TExaS.h"
+#include "tm4c123gh6pm.h"
+
+//CONVERT FROM PORT F TO PORT E
+#define GPIO_PORTE_DATA_R       (*((volatile unsigned long *)0x400243FC))
+#define GPIO_PORTE_DIR_R        (*((volatile unsigned long *)0x40024400))
+#define GPIO_PORTE_AFSEL_R      (*((volatile unsigned long *)0x40024420))
+#define GPIO_PORTE_PUR_R        (*((volatile unsigned long *)0x40024510))
+#define GPIO_PORTE_DEN_R        (*((volatile unsigned long *)0x4002451C))
+#define GPIO_PORTE_LOCK_R       (*((volatile unsigned long *)0x40024520))
+#define GPIO_PORTE_CR_R         (*((volatile unsigned long *)0x40024524))
+#define GPIO_PORTE_AMSEL_R      (*((volatile unsigned long *)0x40024528))
+#define GPIO_PORTE_PCTL_R       (*((volatile unsigned long *)0x4002452C))
+#define SYSCTL_RCGC2_R          (*((volatile unsigned long *)0x400FE108))
+
+//--------------------------------------------------------------------------------------------------------------------------
+// 2. Global Declarations
+
+//    Global Variables
+unsigned long PE0; //Activate Switch on Breadboard
+unsigned long PE1; //Window Sensor on Breadboard
+unsigned char activate;  // 1 = active, 0 = inactive
+
+
+//    Function Prototypes
+void DisableInterrupts(void); // Disable interrupts
+void EnableInterrupts(void);  // Enable interrupts
+void Delay1ms(unsigned long msec);
+void PortE_Init(void);
+void WaitForActive(void);
+void SetSystemActive(void);
+void SetSystemInactive(void);
+void CheckWindowSensor(void);
+
+//--------------------------------------------------------------------------------------------------------------------------
+// 3. Functions/Subroutines
+
+int main(void){ 
+  TExaS_Init(SW_PIN_PE0, LED_PIN_PE1, ScopeOn);  // activate grader and set system clock to 80 MHz
+  EnableInterrupts();                            // enable interrupts for the grader
+	PortE_Init();
+	activate = 0;
+	
+  while(1){
+    WaitForActive();
+		SetSystemActive();
+		while(activate == 1){
+			Delay1ms(100);
+			CheckWindowSensor();
+			PE0 = GPIO_PORTE_DATA_R&0x01;
+			if (PE0 == 0x01){
+				SetSystemInactive();
+				Delay1ms(100);
+			}
+		}
+	}
+}
+
+//--------------------------------------------------------------------------------------------------------------------------
+// PortE_Init: Subroutine to initialize port E pins for input and output
+// PE0 is an input and PE1 is an output red LED
+// Inputs: None
+// Outputs: None
+// Notes: ...
+void PortE_Init(void){ volatile unsigned long delay;
+  SYSCTL_RCGC2_R |= 0x10;           // Port E clock
+  delay = SYSCTL_RCGC2_R;           // wait 3-5 bus cycles
+  GPIO_PORTE_DIR_R |= 0x0C;         // PE2 and PE3 output
+  GPIO_PORTE_DIR_R &= ~0x03;        // PE0 and PE1 input 
+  GPIO_PORTE_AFSEL_R &= ~0x0F;      // not alternative
+  GPIO_PORTE_AMSEL_R &= ~0x0F;      // no analog
+  GPIO_PORTE_PCTL_R &= ~0x0000FFFF; // bits for PE1,PE0
+  GPIO_PORTE_DEN_R |= 0x0F;         // enable PE1,PE0
+}
+
+//--------------------------------------------------------------------------------------------------------------------------
+// Delay1ms: Subroutine to delay in units of milliseconds
+// Inputs:  Number of milliseconds to delay
+// Outputs: None
+// Notes:   assumes 80 MHz clock
+void Delay1ms(unsigned long msec){
+	unsigned long i = msec * 80000 / 6; // 100ms * 80MHz / 6 cycles per loop = 1333333
+	while(i > 0){
+      i = i - 1;
+  }
+}
+
+//--------------------------------------------------------------------------------------------------------------------------
+// WaitForActive: Subroutine to continually read PE0 until it is pressed
+// Inputs:  None
+// Outputs: None
+// Notes:   None
+void WaitForActive(void){
+	Delay1ms(100);
+	do{
+		PE0 = GPIO_PORTE_DATA_R&0x01;
+	}while(PE0==0);
+}
+
+//--------------------------------------------------------------------------------------------------------------------------
+// SetSystemActive: Subroutine to set system active
+// Inputs:  None
+// Outputs: None
+// Notes:   None
+void SetSystemActive(void){
+	GPIO_PORTE_DATA_R |= 0x08;
+	activate = 1;
+}
+//--------------------------------------------------------------------------------------------------------------------------
+// CheckWindowSensor: Subroutine to read PE1 and activate alarm LED
+// Inputs:  None
+// Outputs: None
+// Notes:   None
+void CheckWindowSensor(void){
+	PE1 = GPIO_PORTE_DATA_R&0x02;
+	if(PE1==0){
+		GPIO_PORTE_DATA_R &= ~0x04;
+	}else{
+		GPIO_PORTE_DATA_R ^= 0x04;
+	}
+}
+//--------------------------------------------------------------------------------------------------------------------------
+// WaitForActive: Subroutine to set system inactive
+// Inputs:  None
+// Outputs: None
+// Notes:   None
+void SetSystemInactive(void){
+	GPIO_PORTE_DATA_R &= ~0x08;
+	activate = 0;
+}
